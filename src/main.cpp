@@ -11,6 +11,7 @@
 #include <QUrl>
 
 #include "backend.h"
+#include "portalfilepicker.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -33,7 +34,8 @@ int main(int argc, char *argv[]) {
     app.installTranslator(&translator);
 
     Theme theme;
-    Backend backend;
+    PortalFilePicker picker;
+    Backend backend(QString(), &picker);
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);

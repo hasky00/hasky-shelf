@@ -10,11 +10,13 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QRegularExpression>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTextDocument>
 #include <QtTest>
 
 #include "backend.h"
+#include "filepicker.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -162,6 +164,19 @@ QMap<QString, bool> translatables(const QString &folder, QStringList *problems) 
     return found;
 }
 
+// Stands in for the desktop's file chooser: counts the asks, and answers
+// with whatever the test says was picked.
+class FakePicker : public FilePicker {
+public:
+    void openBooks() override {
+        ++asked;
+        if (!picked.isEmpty())
+            emit booksSelected(picked);
+    }
+    int asked = 0;
+    QList<QUrl> picked;
+};
+
 } // namespace
 
 class HaskyShelfTests : public QObject {
@@ -248,6 +263,61 @@ private slots:
         QTextDocument document;
         document.setPlainText(QString::fromUtf8("10\u00a0km\nnext"));
         QCOMPARE(Backend::rawText(document), QString::fromUtf8("10\u00a0km\nnext"));
+    }
+
+    void aFileIsCopiedOntoTheShelf() {
+        QTemporaryDir dir;
+        const QString original = dir.path() + "/paper_satellites-v2.PDF";
+        QVERIFY(write(original, "%PDF-1.7 not really"));
+        Backend backend(dir.path() + "/shelf");
+        QSignalSpy added(&backend, &Backend::added);
+
+        backend.addFiles({QUrl::fromLocalFile(original)});
+        QVERIFY(backend.busy());
+        QTRY_COMPARE(added.count(), 1);
+        QVERIFY(!backend.busy());
+
+        QCOMPARE(backend.books().size(), 1);
+        const QVariantMap book = backend.books().at(0).toMap();
+        QCOMPARE(book.value("title").toString(), QString("paper satellites v2"));
+        QCOMPARE(book.value("kind").toString(), QString("file"));
+        QCOMPARE(book.value("format").toString(), QString("pdf"));
+        const QString copy = backend.filePath(book.value("id").toString());
+        QVERIFY(copy.startsWith(dir.path() + "/shelf/books/"));
+        QFile shelved(copy);
+        QVERIFY(shelved.open(QIODevice::ReadOnly));
+        QCOMPARE(shelved.readAll(), QByteArray("%PDF-1.7 not really"));
+        // The original is only read: it is still where it was.
+        QVERIFY(QFile::exists(original));
+        // A file book has no page to write on.
+        QVERIFY(!backend.saveText(book.value("id").toString(), "text"));
+    }
+
+    void onlyBooksGoOnTheShelf() {
+        QTemporaryDir dir;
+        QVERIFY(write(dir.path() + "/notes.txt", "plain"));
+        Backend backend(dir.path() + "/shelf");
+        backend.addFiles({QUrl::fromLocalFile(dir.path() + "/notes.txt"), QUrl::fromLocalFile(dir.path() + "/gone.pdf")});
+        QVERIFY(!backend.busy());
+        QVERIFY(!backend.error().isEmpty());
+        QVERIFY(backend.books().isEmpty());
+    }
+
+    void theChooserPutsItsPicksOnTheShelf() {
+        QTemporaryDir dir;
+        QVERIFY(write(dir.path() + "/one.epub", "PK"));
+        FakePicker picker;
+        picker.picked = {QUrl::fromLocalFile(dir.path() + "/one.epub")};
+        Backend backend(dir.path() + "/shelf", &picker);
+        backend.chooseFiles();
+        QCOMPARE(picker.asked, 1);
+        QTRY_COMPARE(backend.books().size(), 1);
+        QCOMPARE(backend.books().at(0).toMap().value("format").toString(), QString("epub"));
+
+        // Without a chooser the shelf says so rather than doing nothing.
+        Backend alone(dir.path() + "/other");
+        alone.chooseFiles();
+        QVERIFY(!alone.error().isEmpty());
     }
 
     void themeFallsBack() {
@@ -443,7 +513,9 @@ private slots:
         Translator translator(dir.path() + "/language");
         QCoreApplication::installTranslator(&translator);
         Theme theme(dir.path());
-        Backend backend(dir.path() + "/shelf");
+        QVERIFY(write(dir.path() + "/Glass_Rivers.pdf", "%PDF"));
+        FakePicker picker;
+        Backend backend(dir.path() + "/shelf", &picker);
 
         QQmlApplicationEngine engine;
         QStringList warnings;
@@ -523,6 +595,15 @@ private slots:
         QTRY_VERIFY(!editor->property("visible").toBool());
         QCOMPARE(backend.readText(bookId), QString("nq\n?"));
         QVERIFY(shelf->hasActiveFocus());
+
+        // A asks the desktop for files; the picked one lands on the shelf
+        // and is the book picked there.
+        picker.picked = {QUrl::fromLocalFile(dir.path() + "/Glass_Rivers.pdf")};
+        QTest::keyClick(window, Qt::Key_A);
+        QCOMPARE(picker.asked, 1);
+        QTRY_COMPARE(shelf->property("count").toInt(), 2);
+        QTRY_COMPARE(shelf->property("currentIndex").toInt(), 1);
+        QCOMPARE(count->property("text").toString(), QString("2 books"));
 
         auto *help = window->findChild<QObject *>("help");
         QTest::keyClick(window, '?');

@@ -65,8 +65,13 @@ ApplicationWindow {
 
     function openBook(index) {
         const book = backend.books[index]
-        if (!book || book.kind !== "written")
+        if (!book)
             return
+        // A book added from a file opens in the desktop's reader for it.
+        if (book.kind === "file") {
+            backend.openInReader(book.id)
+            return
+        }
         const text = backend.readText(book.id)
         if (backend.error !== "")
             return
@@ -112,6 +117,7 @@ ApplicationWindow {
     Shortcut { sequence: "?"; enabled: !newBook.opened && !win.editing; onActivated: help.opened ? help.close() : help.open() }
     Shortcut { sequence: "Q"; enabled: win.shelfHasKeys; onActivated: Qt.quit() }
     Shortcut { sequence: "N"; enabled: win.shelfHasKeys; onActivated: newBook.open() }
+    Shortcut { sequence: "A"; enabled: win.shelfHasKeys; onActivated: backend.chooseFiles() }
     // One Shortcut per key, so `omarchy agent look app --keys` can press each.
     Shortcut { sequence: "Return"; enabled: win.shelfHasKeys; onActivated: win.openBook(grid.currentIndex) }
     Shortcut { sequence: "Enter"; enabled: win.shelfHasKeys; onActivated: win.openBook(grid.currentIndex) }
@@ -121,6 +127,17 @@ ApplicationWindow {
     Shortcut { sequence: "Escape"; enabled: win.editing && !help.opened; onActivated: win.closeBook() }
     Shortcut { sequences: [StandardKey.Save]; enabled: win.editing; onActivated: win.saveBook() }
     Shortcut { sequence: "Ctrl+Q"; enabled: win.editing; onActivated: if (win.saveBook()) Qt.quit() }
+
+    // A book that has just been added is the one picked on the shelf.
+    Connections {
+        target: backend
+        function onAdded(id) {
+            for (let i = 0; i < backend.books.length; ++i) {
+                if (backend.books[i].id === id)
+                    grid.currentIndex = i
+            }
+        }
+    }
 
     // Right-to-left languages mirror the window; the Translator sets the
     // application's layout direction.
@@ -148,12 +165,20 @@ ApplicationWindow {
                 color: theme.accent
             }
 
+            Label {
+                objectName: "adding"
+                visible: backend.busy
+                text: qsTr("Adding…")
+                opacity: 0.7
+            }
+
             Item { Layout.fillWidth: true }
 
             Repeater {
                 model: [
                     { keys: "↵", action: qsTr("Open") },
                     { keys: "N", action: qsTr("New book") },
+                    { keys: "A", action: qsTr("Add files") },
                     { keys: "?", action: qsTr("Shortcuts") }
                 ]
                 delegate: RowLayout {
@@ -403,7 +428,9 @@ ApplicationWindow {
                             anchors.leftMargin: 20
                             anchors.bottom: author.top
                             anchors.bottomMargin: 6
+                            // A book that came from a file says which kind.
                             text: String(cell.index + 1).padStart(2, "0")
+                                  + (cell.modelData.kind === "file" ? "  " + cell.modelData.format.toUpperCase() : "")
                             color: cell.tint
                             font.family: "monospace"
                             font.pixelSize: 11
@@ -433,6 +460,15 @@ ApplicationWindow {
                         onClicked: grid.currentIndex = cell.index
                         onDoubleClicked: win.openBook(cell.index)
                     }
+                }
+            }
+
+            // Files dragged in from the file manager land on the shelf too.
+            DropArea {
+                anchors.fill: parent
+                onDropped: function(drop) {
+                    if (drop.hasUrls)
+                        backend.addFiles(drop.urls)
                 }
             }
 
@@ -718,6 +754,7 @@ ApplicationWindow {
                 ] : [
                     { keys: "↵", action: qsTr("Open the book") },
                     { keys: "N", action: qsTr("Write a new book") },
+                    { keys: "A", action: qsTr("Add PDF or EPUB files") },
                     { keys: "← → ↑ ↓", action: qsTr("Move along the shelf") },
                     { keys: "?", action: qsTr("Show or hide the shortcuts") },
                     { keys: "Q", action: qsTr("Quit") }
