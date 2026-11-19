@@ -1,0 +1,18 @@
+{
+  "%Ln books": { "one": "%Ln bog", "other": "%Ln bøger" },
+  "Author": "Forfatter",
+  "Cancel": "Annuller",
+  "Create": "Opret",
+  "Move along the shelf": "Flyt langs hylden",
+  "New book": "Ny bog",
+  "Press N to write your first book": "Tryk på N for at skrive din første bog",
+  "Quit": "Afslut",
+  "Shortcuts": "Genveje",
+  "Show or hide the shortcuts": "Vis eller skjul genvejene",
+  "The book could not be saved.": "Bogen kunne ikke gemmes.",
+  "The shelf folder could not be created.": "Hyldens mappe kunne ikke oprettes.",
+  "Title": "Titel",
+  "Untitled": "Uden titel",
+  "Write a new book": "Skriv en ny bog",
+  "Your shelf is empty": "Din hylde er tom"
+}

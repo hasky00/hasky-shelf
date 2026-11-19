@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Hasky Shelf
+Comment=One line on what it does
+Exec=haskyshelf %f
+Icon=haskyshelf
+Terminal=false
+Categories=Utility;
+StartupWMClass=haskyshelf

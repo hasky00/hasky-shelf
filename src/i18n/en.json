@@ -1,0 +1,18 @@
+{
+  "%Ln books": { "one": "%Ln book", "other": "%Ln books" },
+  "Author": "Author",
+  "Cancel": "Cancel",
+  "Create": "Create",
+  "Move along the shelf": "Move along the shelf",
+  "New book": "New book",
+  "Press N to write your first book": "Press N to write your first book",
+  "Quit": "Quit",
+  "Shortcuts": "Shortcuts",
+  "Show or hide the shortcuts": "Show or hide the shortcuts",
+  "The book could not be saved.": "The book could not be saved.",
+  "The shelf folder could not be created.": "The shelf folder could not be created.",
+  "Title": "Title",
+  "Untitled": "Untitled",
+  "Write a new book": "Write a new book",
+  "Your shelf is empty": "Your shelf is empty"
+}
