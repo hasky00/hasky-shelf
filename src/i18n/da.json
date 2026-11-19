@@ -1,14 +1,29 @@
 {
-  "%Ln books": { "one": "%Ln bog", "other": "%Ln bøger" },
+  "%Ln books": {
+    "one": "%Ln bog",
+    "other": "%Ln bøger"
+  },
+  "%Ln words": {
+    "one": "%Ln ord",
+    "other": "%Ln ord"
+  },
   "Author": "Forfatter",
+  "Back to the shelf": "Tilbage til hylden",
   "Cancel": "Annuller",
   "Create": "Opret",
   "Move along the shelf": "Flyt langs hylden",
   "New book": "Ny bog",
+  "Not saved yet": "Ikke gemt endnu",
+  "Open": "Åbn",
+  "Open the book": "Åbn bogen",
   "Press N to write your first book": "Tryk på N for at skrive din første bog",
   "Quit": "Afslut",
+  "Save now": "Gem nu",
+  "Saved": "Gemt",
+  "Shelf": "Hylde",
   "Shortcuts": "Genveje",
   "Show or hide the shortcuts": "Vis eller skjul genvejene",
+  "Start writing…": "Begynd at skrive…",
   "The book could not be opened.": "Bogen kunne ikke åbnes.",
   "The book could not be saved.": "Bogen kunne ikke gemmes.",
   "The shelf folder could not be created.": "Hyldens mappe kunne ikke oprettes.",

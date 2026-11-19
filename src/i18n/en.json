@@ -1,14 +1,29 @@
 {
-  "%Ln books": { "one": "%Ln book", "other": "%Ln books" },
+  "%Ln books": {
+    "one": "%Ln book",
+    "other": "%Ln books"
+  },
+  "%Ln words": {
+    "one": "%Ln word",
+    "other": "%Ln words"
+  },
   "Author": "Author",
+  "Back to the shelf": "Back to the shelf",
   "Cancel": "Cancel",
   "Create": "Create",
   "Move along the shelf": "Move along the shelf",
   "New book": "New book",
+  "Not saved yet": "Not saved yet",
+  "Open": "Open",
+  "Open the book": "Open the book",
   "Press N to write your first book": "Press N to write your first book",
   "Quit": "Quit",
+  "Save now": "Save now",
+  "Saved": "Saved",
+  "Shelf": "Shelf",
   "Shortcuts": "Shortcuts",
   "Show or hide the shortcuts": "Show or hide the shortcuts",
+  "Start writing…": "Start writing…",
   "The book could not be opened.": "The book could not be opened.",
   "The book could not be saved.": "The book could not be saved.",
   "The shelf folder could not be created.": "The shelf folder could not be created.",

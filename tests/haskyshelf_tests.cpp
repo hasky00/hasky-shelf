@@ -11,6 +11,7 @@
 #include <QQuickWindow>
 #include <QRegularExpression>
 #include <QTemporaryDir>
+#include <QTextDocument>
 #include <QtTest>
 
 #include "backend.h"
@@ -215,6 +216,38 @@ private slots:
         QVERIFY(backend.createBook("Lost", "").isEmpty());
         QVERIFY(!backend.error().isEmpty());
         QVERIFY(backend.books().isEmpty());
+    }
+
+    void aBooksTextComesBackAsWritten() {
+        QTemporaryDir dir;
+        Backend backend(dir.path());
+        const QString id = backend.createBook("Draft", "");
+        QCOMPARE(backend.readText(id), QString());
+
+        QVERIFY(backend.saveText(id, QString::fromUtf8("First line\nSecond — line")));
+        QVERIFY(backend.error().isEmpty());
+        Backend reopened(dir.path());
+        QCOMPARE(reopened.readText(id), QString::fromUtf8("First line\nSecond — line"));
+    }
+
+    void aBookThatIsNotOnTheShelfIsNeitherReadNorWritten() {
+        QTemporaryDir dir;
+        Backend backend(dir.path());
+        backend.createBook("Real", "");
+        // An id is matched against the shelf, never followed as a path.
+        QVERIFY(!backend.saveText("../outside", "text"));
+        QVERIFY(!backend.error().isEmpty());
+        QVERIFY(!QFile::exists(dir.path() + "/outside/book.md"));
+        QCOMPARE(backend.readText("missing"), QString());
+        QVERIFY(!backend.error().isEmpty());
+    }
+
+    void savingKeepsTheCharactersTheWriterTyped() {
+        // A text property would hand back a plain space for the non-breaking
+        // one, and the book would change by being opened and saved.
+        QTextDocument document;
+        document.setPlainText(QString::fromUtf8("10\u00a0km\nnext"));
+        QCOMPARE(Backend::rawText(document), QString::fromUtf8("10\u00a0km\nnext"));
     }
 
     void themeFallsBack() {
@@ -467,6 +500,29 @@ private slots:
         QTest::keyClick(window, Qt::Key_Escape);
         QTRY_VERIFY(!newBook->property("visible").toBool());
         QCOMPARE(backend.books().size(), 1);
+
+        // Enter opens the picked book as a page; what is typed there is the
+        // book's text, the shelf's own keys included.
+        auto *page = window->findChild<QQuickItem *>("page");
+        auto *editor = window->findChild<QQuickItem *>("editorView");
+        QVERIFY(page && editor);
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_VERIFY(editor->property("visible").toBool());
+        QTRY_VERIFY(page->hasActiveFocus());
+        for (const QChar letter : QString("nq"))
+            QTest::keyClick(window, letter.toLatin1());
+        QTest::keyClick(window, Qt::Key_Return);
+        QTest::keyClick(window, '?');
+        QCOMPARE(page->property("text").toString(), QString("nq\n?"));
+        QVERIFY(!newBook->property("opened").toBool());
+        QVERIFY(page->property("unsaved").toBool());
+
+        // Escape saves the page and goes back to the shelf.
+        const QString bookId = backend.books().at(0).toMap().value("id").toString();
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!editor->property("visible").toBool());
+        QCOMPARE(backend.readText(bookId), QString("nq\n?"));
+        QVERIFY(shelf->hasActiveFocus());
 
         auto *help = window->findChild<QObject *>("help");
         QTest::keyClick(window, '?');

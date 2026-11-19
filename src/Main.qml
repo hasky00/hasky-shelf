@@ -21,7 +21,13 @@ ApplicationWindow {
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
     // Bare keys belong to the shelf, so they step aside whenever a dialog,
     // and the text fields in it, has the keyboard.
-    readonly property bool shelfHasKeys: !newBook.opened && !help.opened
+    readonly property bool shelfHasKeys: !newBook.opened && !help.opened && !editing
+
+    // The book open for writing, by its id; none while the shelf is showing.
+    property string openId: ""
+    property string openTitle: ""
+    property string openAuthor: ""
+    readonly property bool editing: openId !== ""
 
     // One cell of the shelf: a cover standing on a lit shelf line.
     readonly property int cellWidth: 168
@@ -57,14 +63,70 @@ ApplicationWindow {
         return Qt.rgba(color.r, color.g, color.b, alpha)
     }
 
-    Shortcut { sequence: "?"; enabled: !newBook.opened; onActivated: help.opened ? help.close() : help.open() }
+    function openBook(index) {
+        const book = backend.books[index]
+        if (!book || book.kind !== "written")
+            return
+        const text = backend.readText(book.id)
+        if (backend.error !== "")
+            return
+        page.text = text
+        page.savedText = page.text
+        page.cursorPosition = page.length
+        win.countWords()
+        openTitle = book.title
+        openAuthor = book.author
+        openId = book.id
+        page.forceActiveFocus()
+    }
+
+    // True when nothing is left unsaved, so leaving the book loses nothing.
+    function saveBook() {
+        if (!editing || !page.unsaved)
+            return true
+        if (!backend.saveDocument(openId, page.textDocument))
+            return false
+        page.savedText = page.text
+        win.countWords()
+        return true
+    }
+
+    function closeBook() {
+        if (!saveBook())
+            return
+        openId = ""
+        grid.forceActiveFocus()
+    }
+
+    property int words: 0
+    function countWords() {
+        const found = page.text.trim()
+        words = found === "" ? 0 : found.split(/\s+/).length
+    }
+
+    // A book that can't be saved keeps the window open, with the reason shown.
+    onClosing: function(close) { close.accepted = saveBook() }
+
+    // On the shelf the keys are bare; in a book they are text, so the
+    // shortcuts move to F1, Escape and Ctrl.
+    Shortcut { sequence: "?"; enabled: !newBook.opened && !win.editing; onActivated: help.opened ? help.close() : help.open() }
     Shortcut { sequence: "Q"; enabled: win.shelfHasKeys; onActivated: Qt.quit() }
     Shortcut { sequence: "N"; enabled: win.shelfHasKeys; onActivated: newBook.open() }
+    // One Shortcut per key, so `omarchy agent look app --keys` can press each.
+    Shortcut { sequence: "Return"; enabled: win.shelfHasKeys; onActivated: win.openBook(grid.currentIndex) }
+    Shortcut { sequence: "Enter"; enabled: win.shelfHasKeys; onActivated: win.openBook(grid.currentIndex) }
+
+    Shortcut { sequence: "F1"; enabled: win.editing; onActivated: help.opened ? help.close() : help.open() }
+    Shortcut { sequence: "Ctrl+?"; enabled: win.editing; onActivated: help.opened ? help.close() : help.open() }
+    Shortcut { sequence: "Escape"; enabled: win.editing && !help.opened; onActivated: win.closeBook() }
+    Shortcut { sequences: [StandardKey.Save]; enabled: win.editing; onActivated: win.saveBook() }
+    Shortcut { sequence: "Ctrl+Q"; enabled: win.editing; onActivated: if (win.saveBook()) Qt.quit() }
 
     // Right-to-left languages mirror the window; the Translator sets the
     // application's layout direction.
     Item {
         anchors.fill: parent
+        visible: !win.editing
         LayoutMirroring.enabled: win.rightToLeft
         LayoutMirroring.childrenInherit: true
 
@@ -90,6 +152,7 @@ ApplicationWindow {
 
             Repeater {
                 model: [
+                    { keys: "↵", action: qsTr("Open") },
                     { keys: "N", action: qsTr("New book") },
                     { keys: "?", action: qsTr("Shortcuts") }
                 ]
@@ -368,6 +431,7 @@ ApplicationWindow {
                     MouseArea {
                         anchors.fill: cover
                         onClicked: grid.currentIndex = cell.index
+                        onDoubleClicked: win.openBook(cell.index)
                     }
                 }
             }
@@ -389,6 +453,149 @@ ApplicationWindow {
                     opacity: 0.7
                 }
             }
+        }
+    }
+
+
+    // The open book: a page to write on, and nothing else.
+    Item {
+        id: editorView
+        objectName: "editorView"
+        anchors.fill: parent
+        visible: win.editing
+        LayoutMirroring.enabled: win.rightToLeft
+        LayoutMirroring.childrenInherit: true
+
+        RowLayout {
+            id: bookHeader
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: 24
+            spacing: 16
+
+            Label {
+                objectName: "openTitle"
+                Layout.maximumWidth: editorView.width * 0.4
+                text: win.openTitle
+                font.pixelSize: 15
+                font.bold: true
+                font.letterSpacing: 1.5
+                font.capitalization: Font.AllUppercase
+                color: theme.accent
+                elide: Text.ElideRight
+            }
+            Label {
+                Layout.maximumWidth: editorView.width * 0.2
+                text: win.openAuthor
+                opacity: 0.7
+                elide: Text.ElideRight
+            }
+
+            Item { Layout.fillWidth: true }
+
+            Label {
+                objectName: "saveState"
+                text: page.unsaved ? qsTr("Not saved yet") : qsTr("Saved")
+                opacity: 0.7
+            }
+            Label {
+                objectName: "wordCount"
+                text: qsTr("%Ln words", "", win.words)
+                opacity: 0.7
+            }
+            RowLayout {
+                spacing: 8
+                Label {
+                    text: "Esc"
+                    color: theme.accent
+                    font.bold: true
+                }
+                Label {
+                    text: qsTr("Shelf")
+                    opacity: 0.7
+                }
+            }
+        }
+
+        Label {
+            id: bookError
+            anchors.top: bookHeader.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: 24
+            visible: backend.error !== ""
+            text: backend.error
+            color: theme.colors.red ? theme.colors.red : theme.accent
+            wrapMode: Text.Wrap
+        }
+
+        // The same neon that lights the cabinet, over the page.
+        Rectangle {
+            id: pageLight
+            anchors.top: bookError.visible ? bookError.bottom : bookHeader.bottom
+            anchors.topMargin: 20
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Math.min(parent.width - 48, 760)
+            height: 2
+            color: theme.accent
+        }
+
+        Flickable {
+            id: pageArea
+            anchors.top: pageLight.bottom
+            anchors.topMargin: 20
+            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: pageLight.width
+            contentWidth: width
+            contentHeight: page.implicitHeight + 120
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar {}
+
+            // Keeps the line being written in view as the book grows.
+            function follow(cursor) {
+                if (cursor.y < contentY)
+                    contentY = cursor.y
+                else if (cursor.y + cursor.height > contentY + height - 40)
+                    contentY = cursor.y + cursor.height - height + 40
+            }
+
+            TextEdit {
+                id: page
+                objectName: "page"
+                width: pageArea.width
+                wrapMode: TextEdit.Wrap
+                textFormat: TextEdit.PlainText
+                selectByMouse: true
+                color: theme.foreground
+                selectionColor: theme.accent
+                selectedTextColor: theme.accentForeground
+                font.pixelSize: 17
+
+                // What is on disk, to tell written from saved by comparing
+                // the two, so undoing back to the saved text is clean again.
+                property string savedText: ""
+                readonly property bool unsaved: text !== savedText
+
+                onCursorRectangleChanged: pageArea.follow(cursorRectangle)
+                onTextChanged: if (win.editing && unsaved) autosave.restart()
+            }
+
+            Label {
+                visible: page.length === 0
+                text: qsTr("Start writing…")
+                font: page.font
+                opacity: 0.4
+            }
+        }
+
+        // One save a moment after the writer pauses, rather than one per key.
+        Timer {
+            id: autosave
+            interval: 1200
+            onTriggered: win.saveBook()
         }
     }
 
@@ -503,7 +710,13 @@ ApplicationWindow {
             LayoutMirroring.childrenInherit: true
 
             Repeater {
-                model: [
+                model: win.editing ? [
+                    { keys: "Esc", action: qsTr("Back to the shelf") },
+                    { keys: "Ctrl S", action: qsTr("Save now") },
+                    { keys: "F1", action: qsTr("Show or hide the shortcuts") },
+                    { keys: "Ctrl Q", action: qsTr("Quit") }
+                ] : [
+                    { keys: "↵", action: qsTr("Open the book") },
                     { keys: "N", action: qsTr("Write a new book") },
                     { keys: "← → ↑ ↓", action: qsTr("Move along the shelf") },
                     { keys: "?", action: qsTr("Show or hide the shortcuts") },
