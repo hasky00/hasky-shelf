@@ -133,44 +133,114 @@ ApplicationWindow {
             anchors.rightMargin: 24
             clip: true
 
-            readonly property int columns: Math.max(1, Math.floor(width / win.cellWidth))
+            // The cabinet's own woodwork: side walls, and the hood that holds
+            // the light above the top shelf.
+            readonly property int wall: 12
+            readonly property int hood: 34
+            readonly property int board: 8
+
+            readonly property int columns: Math.max(1, Math.floor((width - 2 * wall - 32) / win.cellWidth))
             readonly property int rows: Math.max(Math.ceil(backend.books.length / columns),
-                                                 Math.ceil(height / win.cellHeight))
+                                                 Math.ceil(grid.height / win.cellHeight))
 
-            // The shelves run the full width whether or not a book stands on
-            // them, and travel with the books as the shelf scrolls.
-            Repeater {
-                model: shelfArea.rows
-                delegate: Item {
-                    required property int index
-                    width: shelfArea.width
-                    y: index * win.cellHeight + win.shelfLine - grid.contentY
+            Rectangle {
+                id: cabinet
+                objectName: "cabinet"
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 16
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: grid.width + 2 * shelfArea.wall + 32
+                radius: theme.radius
+                // The back panel, a shade off the wall behind the cabinet.
+                color: win.glass(theme.foreground, 0.04)
+                border.width: 1
+                border.color: win.fade(theme.foreground, 0.22)
+                clip: true
 
-                    // The light the shelf throws down the wall.
-                    Rectangle {
-                        width: parent.width
-                        height: 34
-                        gradient: Gradient {
-                            GradientStop { position: 0; color: win.fade(theme.accent, 0.20) }
-                            GradientStop { position: 1; color: win.fade(theme.accent, 0) }
+                // The boards run wall to wall whether or not a book stands on
+                // them, and travel with the books as the shelf scrolls.
+                Repeater {
+                    model: shelfArea.rows
+                    delegate: Item {
+                        required property int index
+                        x: shelfArea.wall
+                        width: cabinet.width - 2 * shelfArea.wall
+                        y: shelfArea.hood + index * win.cellHeight + win.shelfLine - grid.contentY
+
+                        Rectangle {
+                            width: parent.width
+                            height: shelfArea.board
+                            color: win.glass(theme.foreground, 0.16)
+                        }
+                        // The board's front edge, catching the light from above.
+                        Rectangle {
+                            width: parent.width
+                            height: 1
+                            color: win.fade(theme.accent, 0.9)
+                        }
+                        // And the shadow it throws on the shelf below.
+                        Rectangle {
+                            y: shelfArea.board
+                            width: parent.width
+                            height: 22
+                            gradient: Gradient {
+                                GradientStop { position: 0; color: Qt.rgba(0, 0, 0, theme.light ? 0.10 : 0.35) }
+                                GradientStop { position: 1; color: Qt.rgba(0, 0, 0, 0) }
+                            }
                         }
                     }
-                    Rectangle {
-                        width: parent.width
-                        height: 2
-                        color: theme.accent
+                }
+
+                // The hood, with the neon tube under it.
+                Rectangle {
+                    width: parent.width
+                    height: shelfArea.hood - 12
+                    color: win.glass(theme.foreground, 0.12)
+                }
+                Rectangle {
+                    id: neon
+                    objectName: "neon"
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    y: shelfArea.hood - 12
+                    width: parent.width - 2 * shelfArea.wall - 24
+                    height: 6
+                    radius: 3
+                    color: theme.accent
+                }
+                // Its hot core.
+                Rectangle {
+                    anchors.horizontalCenter: neon.horizontalCenter
+                    y: neon.y + 2
+                    width: neon.width - 10
+                    height: 2
+                    radius: 1
+                    color: Qt.lighter(theme.accent, 1.6)
+                }
+                // And the light it pours down the cabinet.
+                Rectangle {
+                    x: shelfArea.wall
+                    y: neon.y + neon.height
+                    width: parent.width - 2 * shelfArea.wall
+                    height: 150
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: win.fade(theme.accent, 0.30) }
+                        GradientStop { position: 0.35; color: win.fade(theme.accent, 0.10) }
+                        GradientStop { position: 1; color: win.fade(theme.accent, 0) }
                     }
-                    // Brighter at the middle, like a lit strip.
-                    Rectangle {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: parent.width * 0.6
-                        height: 2
-                        gradient: Gradient {
-                            orientation: Gradient.Horizontal
-                            GradientStop { position: 0; color: win.fade(theme.foreground, 0) }
-                            GradientStop { position: 0.5; color: win.fade(theme.foreground, 0.75) }
-                            GradientStop { position: 1; color: win.fade(theme.foreground, 0) }
-                        }
+                }
+
+                // The side walls stand in front of the boards.
+                Repeater {
+                    model: 2
+                    delegate: Rectangle {
+                        required property int index
+                        x: index === 0 ? 0 : cabinet.width - shelfArea.wall
+                        width: shelfArea.wall
+                        height: cabinet.height
+                        color: win.glass(theme.foreground, 0.12)
+                        border.width: 1
+                        border.color: win.fade(theme.foreground, 0.18)
                     }
                 }
             }
@@ -178,10 +248,13 @@ ApplicationWindow {
             GridView {
                 id: grid
                 objectName: "shelf"
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
+                anchors.top: cabinet.top
+                anchors.topMargin: shelfArea.hood
+                anchors.bottom: cabinet.bottom
+                anchors.bottomMargin: 1
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: shelfArea.columns * win.cellWidth
+                clip: true
                 cellWidth: win.cellWidth
                 cellHeight: win.cellHeight
                 model: backend.books
@@ -200,16 +273,13 @@ ApplicationWindow {
                     readonly property bool current: GridView.isCurrentItem
                     readonly property color tint: win.tintFor(modelData.tint)
 
-                    // The cover's reflection in the shelf under it.
+                    // The book's color, thrown onto the board it stands on.
                     Rectangle {
                         anchors.horizontalCenter: cover.horizontalCenter
-                        y: win.shelfLine + 2
+                        y: win.shelfLine + 1
                         width: win.coverWidth
-                        height: 30
-                        gradient: Gradient {
-                            GradientStop { position: 0; color: win.fade(cell.tint, cell.current ? 0.45 : 0.22) }
-                            GradientStop { position: 1; color: win.fade(cell.tint, 0) }
-                        }
+                        height: 7
+                        color: win.fade(cell.tint, cell.current ? 0.75 : 0.35)
                     }
 
                     Rectangle {

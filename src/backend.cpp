@@ -6,8 +6,10 @@
 #include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QQuickTextDocument>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QTextDocument>
 #include <QUuid>
 
 #include <algorithm>
@@ -92,4 +94,48 @@ QString Backend::createBook(const QString &title, const QString &author) {
     setError({});
     load();
     return id;
+}
+
+QString Backend::textPath(const QString &id) const {
+    for (const QVariant &entry : m_books) {
+        const QVariantMap book = entry.toMap();
+        if (book.value("id").toString() == id && book.value("kind").toString() == "written")
+            return m_root + "/books/" + id + "/book.md";
+    }
+    return {};
+}
+
+QString Backend::readText(const QString &id) {
+    const QString path = textPath(id);
+    QFile file(path);
+    if (path.isEmpty() || !file.open(QIODevice::ReadOnly)) {
+        setError(tr("The book could not be opened."));
+        return {};
+    }
+    setError({});
+    return QString::fromUtf8(file.readAll());
+}
+
+bool Backend::saveText(const QString &id, const QString &text) {
+    const QString path = textPath(id);
+    if (path.isEmpty() || !save(path, text.toUtf8())) {
+        setError(tr("The book could not be saved."));
+        return false;
+    }
+    setError({});
+    return true;
+}
+
+QString Backend::rawText(const QTextDocument &document) {
+    QString text = document.toRawText();
+    text.replace(QChar::ParagraphSeparator, QChar('\n'));
+    return text;
+}
+
+bool Backend::saveDocument(const QString &id, QQuickTextDocument *document) {
+    if (!document || !document->textDocument()) {
+        setError(tr("The book could not be saved."));
+        return false;
+    }
+    return saveText(id, rawText(*document->textDocument()));
 }
