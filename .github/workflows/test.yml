@@ -23,13 +23,9 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Install the package's dependencies
-        # The package lives in omarchy-pkgs, so its PKGBUILD is the one list of what the app needs and CI reads it rather than keeping a copy.
-        run: |
-          curl -fsSL "https://raw.githubusercontent.com/omacom/omarchy-pkgs/master/pkgbuilds/${{ github.event.repository.name }}/PKGBUILD" -o "$RUNNER_TEMP/PKGBUILD"
-          source "$RUNNER_TEMP/PKGBUILD"
-          deps=("${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}")
-          pacman -S --noconfirm --needed base-devel cmake dbus "${deps[@]%%[<>=]*}"
+      - name: Install what the build needs
+        # The same packages install.sh asks for.
+        run: pacman -S --noconfirm --needed base-devel cmake dbus qt6-base qt6-declarative qt6-svg qt6-wayland
 
       - name: Set up a user and a locale like a desktop's
         # Root can read any file, so tests about unreadable ones need an ordinary user, with a second group for tests that change a file's group; and the container generates no locale.
