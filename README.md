@@ -9,6 +9,17 @@ A shelf for the books you write and collect, for Omarchy. Books stand cover-out 
 
 Your books live in `~/.local/share/haskyshelf/books/`, one folder each.
 
+## Install
+
+On Omarchy, or any Arch-based desktop:
+
+```bash
+git clone https://github.com/hasky00/hasky-shelf.git
+hasky-shelf/install.sh
+```
+
+It builds the app and installs it for you alone, under `~/.local`. Then open "Hasky Shelf" from the app launcher. To update later, run `git pull` in the folder and `install.sh` again.
+
 ## Shortcuts
 
 On the shelf:
