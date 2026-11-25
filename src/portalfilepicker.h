@@ -17,6 +17,7 @@ public:
     explicit PortalFilePicker(QObject *parent = nullptr);
 
     void openBooks() override;
+    void openCover() override;
 
 private slots:
     void handleResponse(uint response, const QVariantMap &results);
@@ -30,6 +31,8 @@ private:
 
     QString m_pendingPath;
     bool m_pending = false;
+    // What the pending dialog was asked for: a cover, or books.
+    bool m_forCover = false;
     // Bumped per request, so a late reply for a replaced request is ignored.
     int m_pendingGeneration = 0;
     QDBusPendingCallWatcher *m_pendingWatcher = nullptr;

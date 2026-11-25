@@ -1,5 +1,7 @@
 #include "epub.h"
 
+#include "markup.h"
+
 #include <QDateTime>
 #include <QList>
 #include <QStringList>
@@ -95,14 +97,18 @@ private:
 };
 
 // Characters XML has no place for would make the whole book unreadable.
-QString escaped(const QString &text) {
+QString readable(const QString &text) {
     QString out;
     for (const QChar c : text) {
         if (c.unicode() < 0x20 && c != '\n' && c != '\t')
             continue;
         out += c;
     }
-    return out.toHtmlEscaped();
+    return out;
+}
+
+QString escaped(const QString &text) {
+    return readable(text).toHtmlEscaped();
 }
 
 const char *containerXml = R"(<?xml version="1.0" encoding="UTF-8"?>
@@ -135,7 +141,7 @@ QString Epub::page(const QString &title, const QString &author, const QString &t
         if (line.trimmed().isEmpty())
             close();
         else
-            lines << escaped(line);
+            lines << Markup::html(readable(line));
     }
     close();
 

@@ -12,7 +12,8 @@ namespace Epub {
 QByteArray write(const QString &id, const QString &title, const QString &author, const QString &text);
 
 // The text as the book's page: a blank line parts two paragraphs, and a
-// line break inside one stays a line break, so verse keeps its lines.
+// line break inside one stays a line break, so verse keeps its lines. Words
+// the writer starred come out bold or italic; see markup.h.
 QString page(const QString &title, const QString &author, const QString &text);
 
 } // namespace Epub

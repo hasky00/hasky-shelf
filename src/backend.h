@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QObject>
 #include <QString>
 #include <QVariantList>
@@ -42,6 +43,11 @@ public:
     // flattened copy a text property hands out.
     Q_INVOKABLE bool saveDocument(const QString &id, QQuickTextDocument *document);
 
+    // Shows the page's starred words as bold and italic while they are
+    // written; see markup.h. faint is the color the stars are dimmed to.
+    // Asking again for the same page only changes that color.
+    Q_INVOKABLE void decorate(QQuickTextDocument *document, const QColor &faint);
+
     // Asks the desktop for book files, and puts the chosen ones on the shelf.
     Q_INVOKABLE void chooseFiles();
     // Copies each PDF or EPUB onto the shelf. The originals are only read.
@@ -51,6 +57,14 @@ public:
     Q_INVOKABLE QString filePath(const QString &id) const;
     // Opens such a book in the desktop's own reader for its format.
     Q_INVOKABLE bool openInReader(const QString &id);
+
+    // Asks the desktop for a picture, and stands it on this book's cover.
+    Q_INVOKABLE void chooseCover(const QString &id);
+    // Copies a PNG or JPEG into the book's folder as its cover. The original
+    // is only read. A cover set before is replaced.
+    Q_INVOKABLE bool setCover(const QString &id, const QUrl &url);
+    // True when the file's name says it is a picture a cover can be made of.
+    Q_INVOKABLE bool isPicture(const QUrl &url) const;
 
     // Puts a copy of the book in the share folder as one file to hand to
     // someone: an EPUB of a book written here, the file itself of one that
@@ -87,5 +101,7 @@ private:
     QVariantList m_books;
     QString m_error;
     FilePicker *m_picker;
+    // The book the cover chooser was opened for.
+    QString m_coverFor;
     int m_copying = 0;
 };

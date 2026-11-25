@@ -2,6 +2,7 @@
 
 #include "epub.h"
 #include "filepicker.h"
+#include "markup.h"
 
 #include <QDateTime>
 #include <QDesktopServices>
@@ -11,6 +12,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QImageReader>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPointer>
@@ -43,6 +45,17 @@ bool save(const QString &path, const QByteArray &content) {
 
 // The formats a file can have to go on the shelf.
 const QStringList bookFormats = {"pdf", "epub"};
+
+// The formats a picture can have to stand on a cover: the two Qt reads
+// without an extra package.
+const QStringList coverFormats = {"png", "jpg", "jpeg"};
+
+// A cover is far smaller than a book; a file past this is not one.
+constexpr qint64 coverLimit = 30 * 1024 * 1024;
+
+// The only names a cover file ever has in a book's folder. book.json is
+// matched against this, so what it says is never followed as a path.
+const QRegularExpression coverName(QStringLiteral("^cover-[0-9]+\\.(png|jpg|jpeg)$"));
 
 // A file's name as a title: "paper_satellites-v2.pdf" reads as
 // "paper satellites v2" on the cover.
@@ -79,6 +92,7 @@ Backend::Backend(const QString &root, FilePicker *picker, QObject *parent)
       m_picker(picker) {
     if (m_picker) {
         connect(m_picker, &FilePicker::booksSelected, this, &Backend::addFiles);
+        connect(m_picker, &FilePicker::coverSelected, this, [this](const QUrl &url) { setCover(m_coverFor, url); });
         connect(m_picker, &FilePicker::failed, this, &Backend::setError);
     }
     load();
@@ -106,6 +120,13 @@ void Backend::load() {
         // The color is a property of the book, not of its place on the
         // shelf, so it stays the same as books come and go around it.
         book["tint"] = int(qHash(id) % tints);
+        // Where the cover picture is, for the window to show; empty when the
+        // book has none, or the file it names is gone.
+        const QString cover = json.value("cover").toString();
+        const QString coverPath = shelf.filePath(id + "/" + cover);
+        book["coverUrl"] = coverName.match(cover).hasMatch() && QFile::exists(coverPath)
+                               ? QUrl::fromLocalFile(coverPath).toString()
+                               : QString();
         books << book;
     }
     // Oldest first: a new book lands at the end of the shelf.
@@ -311,6 +332,71 @@ void Backend::addFiles(const QList<QUrl> &urls) {
     }
 }
 
+void Backend::chooseCover(const QString &id) {
+    if (book(id).isEmpty())
+        return;
+    if (!m_picker) {
+        setError(tr("The desktop's file chooser is not available."));
+        return;
+    }
+    m_coverFor = id;
+    m_picker->openCover();
+}
+
+bool Backend::isPicture(const QUrl &url) const {
+    return coverFormats.contains(QFileInfo(url.toLocalFile()).suffix().toLower());
+}
+
+bool Backend::setCover(const QString &id, const QUrl &url) {
+    // An id is only ever matched against the shelf, as everywhere else.
+    if (book(id).isEmpty()) {
+        setError(tr("The cover could not be saved."));
+        return false;
+    }
+    const QFileInfo source(url.toLocalFile());
+    const QString format = source.suffix().toLower();
+    // The name has to say picture and the content has to be one.
+    if (!source.isFile() || !coverFormats.contains(format) || source.size() > coverLimit
+        || !QImageReader(source.absoluteFilePath()).canRead()) {
+        setError(tr("Only PNG and JPEG pictures can go on a cover."));
+        return false;
+    }
+
+    const QString folder = m_root + "/books/" + id;
+    QFile description(folder + "/book.json");
+    QFile picture(source.absoluteFilePath());
+    if (!description.open(QIODevice::ReadOnly) || !picture.open(QIODevice::ReadOnly)) {
+        setError(tr("The cover could not be saved."));
+        return false;
+    }
+    QJsonObject json = QJsonDocument::fromJson(description.readAll()).object();
+    description.close();
+    if (json.isEmpty()) {
+        setError(tr("The cover could not be saved."));
+        return false;
+    }
+    const QString before = json.value("cover").toString();
+
+    // A new name each time, so the window never shows the picture it had
+    // in memory under the old one.
+    const QString name = "cover-" + QString::number(QDateTime::currentMSecsSinceEpoch()) + "." + format;
+    json["cover"] = name;
+    // The picture first, the description last: a book never names a cover
+    // that isn't there yet.
+    if (!save(folder + "/" + name, picture.readAll())
+        || !save(folder + "/book.json", QJsonDocument(json).toJson())) {
+        QFile::remove(folder + "/" + name);
+        setError(tr("The cover could not be saved."));
+        return false;
+    }
+    if (before != name && coverName.match(before).hasMatch())
+        QFile::remove(folder + "/" + before);
+
+    setError({});
+    load();
+    return true;
+}
+
 QString Backend::readText(const QString &id) {
     const QString path = textPath(id);
     QFile file(path);
@@ -336,6 +422,16 @@ QString Backend::rawText(const QTextDocument &document) {
     QString text = document.toRawText();
     text.replace(QChar::ParagraphSeparator, QChar('\n'));
     return text;
+}
+
+void Backend::decorate(QQuickTextDocument *document, const QColor &faint) {
+    if (!document || !document->textDocument())
+        return;
+    QTextDocument *text = document->textDocument();
+    auto *highlighter = text->findChild<MarkupHighlighter *>(QString(), Qt::FindDirectChildrenOnly);
+    if (!highlighter)
+        highlighter = new MarkupHighlighter(text);
+    highlighter->setFaint(faint);
 }
 
 bool Backend::saveDocument(const QString &id, QQuickTextDocument *document) {

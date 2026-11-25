@@ -15,8 +15,11 @@ public:
 
     // Pick one or more book files to put on the shelf.
     virtual void openBooks() = 0;
+    // Pick one picture to stand on a book's cover.
+    virtual void openCover() = 0;
 
 signals:
     void booksSelected(const QList<QUrl> &urls);
+    void coverSelected(const QUrl &url);
     void failed(const QString &message);
 };

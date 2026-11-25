@@ -1,5 +1,6 @@
 #include <QDir>
 #include <QFile>
+#include <QImage>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalServer>
@@ -12,12 +13,15 @@
 #include <QRegularExpression>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QTextBlock>
 #include <QTextDocument>
+#include <QTextLayout>
 #include <QtTest>
 
 #include "backend.h"
 #include "epub.h"
 #include "filepicker.h"
+#include "markup.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -174,9 +178,23 @@ public:
         if (!picked.isEmpty())
             emit booksSelected(picked);
     }
+    void openCover() override {
+        ++askedForCover;
+        if (!pickedCover.isEmpty())
+            emit coverSelected(pickedCover);
+    }
     int asked = 0;
+    int askedForCover = 0;
     QList<QUrl> picked;
+    QUrl pickedCover;
 };
+
+// A real picture file, small enough to make in a test.
+bool paint(const QString &path, const QColor &color) {
+    QImage image(40, 60, QImage::Format_RGB32);
+    image.fill(color);
+    return image.save(path);
+}
 
 } // namespace
 
@@ -319,6 +337,157 @@ private slots:
         Backend alone(dir.path() + "/other");
         alone.chooseFiles();
         QVERIFY(!alone.error().isEmpty());
+    }
+
+    void aPictureStandsOnTheCover() {
+        QTemporaryDir dir;
+        const QString roses = dir.path() + "/roses.PNG";
+        QVERIFY(paint(roses, Qt::red));
+        Backend backend(dir.path() + "/shelf");
+        const QString id = backend.createBook("Roses", "hasky");
+        QCOMPARE(backend.books().at(0).toMap().value("coverUrl").toString(), QString());
+
+        QVERIFY(backend.setCover(id, QUrl::fromLocalFile(roses)));
+        QVERIFY(backend.error().isEmpty());
+        const QString first = QUrl(backend.books().at(0).toMap().value("coverUrl").toString()).toLocalFile();
+        QVERIFY(first.startsWith(dir.path() + "/shelf/books/" + id + "/cover-"));
+        QCOMPARE(QImage(first).pixelColor(0, 0), QColor(Qt::red));
+        // The original is only read, and the book is still the book it was.
+        QVERIFY(QFile::exists(roses));
+        QCOMPARE(backend.books().at(0).toMap().value("title").toString(), QString("Roses"));
+        QCOMPARE(backend.books().at(0).toMap().value("author").toString(), QString("hasky"));
+
+        // The cover is still there when the shelf is opened again.
+        Backend reopened(dir.path() + "/shelf");
+        QCOMPARE(QUrl(reopened.books().at(0).toMap().value("coverUrl").toString()).toLocalFile(), first);
+
+        // A second picture takes the first one's place, under a new name.
+        const QString other = dir.path() + "/other.jpg";
+        QVERIFY(paint(other, Qt::blue));
+        QTest::qWait(5);
+        QVERIFY(backend.setCover(id, QUrl::fromLocalFile(other)));
+        const QString second = QUrl(backend.books().at(0).toMap().value("coverUrl").toString()).toLocalFile();
+        QVERIFY(second != first);
+        QVERIFY(second.endsWith(".jpg"));
+        QVERIFY(!QFile::exists(first));
+        QVERIFY(QFile::exists(second));
+    }
+
+    void onlyPicturesGoOnACover() {
+        QTemporaryDir dir;
+        Backend backend(dir.path() + "/shelf");
+        const QString id = backend.createBook("Plain", "");
+        // The name says picture but the content is not one.
+        QVERIFY(write(dir.path() + "/fake.png", "not a picture"));
+        QVERIFY(!backend.setCover(id, QUrl::fromLocalFile(dir.path() + "/fake.png")));
+        QVERIFY(!backend.error().isEmpty());
+        QVERIFY(write(dir.path() + "/notes.txt", "plain"));
+        QVERIFY(!backend.setCover(id, QUrl::fromLocalFile(dir.path() + "/notes.txt")));
+        QVERIFY(!backend.setCover(id, QUrl::fromLocalFile(dir.path() + "/gone.png")));
+        QCOMPARE(backend.books().at(0).toMap().value("coverUrl").toString(), QString());
+        QCOMPARE(QDir(dir.path() + "/shelf/books/" + id).entryList(QDir::Files).size(), 2);
+
+        // A book that is not on the shelf gets no cover, and no folder.
+        QVERIFY(paint(dir.path() + "/real.png", Qt::green));
+        QVERIFY(!backend.setCover("../outside", QUrl::fromLocalFile(dir.path() + "/real.png")));
+        QVERIFY(!QDir(dir.path() + "/shelf/outside").exists());
+
+        QVERIFY(backend.isPicture(QUrl::fromLocalFile("/somewhere/Rose.JPEG")));
+        QVERIFY(!backend.isPicture(QUrl::fromLocalFile("/somewhere/rose.pdf")));
+    }
+
+    void aCoverNamedInTheDescriptionIsNeverFollowedAsAPath() {
+        QTemporaryDir dir;
+        QVERIFY(paint(dir.path() + "/secret.png", Qt::red));
+        QString id;
+        {
+            Backend backend(dir.path() + "/shelf");
+            id = backend.createBook("Sly", "");
+        }
+        const QString description = dir.path() + "/shelf/books/" + id + "/book.json";
+        QFile file(description);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QJsonObject json = QJsonDocument::fromJson(file.readAll()).object();
+        file.close();
+        json["cover"] = "../../../secret.png";
+        QVERIFY(write(description, QJsonDocument(json).toJson()));
+        Backend backend(dir.path() + "/shelf");
+        QCOMPARE(backend.books().at(0).toMap().value("coverUrl").toString(), QString());
+    }
+
+    void theChooserPutsItsPictureOnTheBook() {
+        QTemporaryDir dir;
+        QVERIFY(paint(dir.path() + "/roses.png", Qt::red));
+        FakePicker picker;
+        picker.pickedCover = QUrl::fromLocalFile(dir.path() + "/roses.png");
+        Backend backend(dir.path() + "/shelf", &picker);
+        const QString first = backend.createBook("One", "");
+        const QString second = backend.createBook("Two", "");
+        backend.chooseCover(second);
+        QCOMPARE(picker.askedForCover, 1);
+        // The picture goes on the book it was picked for, and only that one.
+        for (const QVariant &entry : backend.books()) {
+            const QVariantMap book = entry.toMap();
+            QCOMPARE(book.value("coverUrl").toString().isEmpty(), book.value("id").toString() == first);
+        }
+        // A book that is not on the shelf never opens the chooser.
+        backend.chooseCover("missing");
+        QCOMPARE(picker.askedForCover, 1);
+
+        Backend alone(dir.path() + "/other");
+        alone.chooseCover(alone.createBook("Solo", ""));
+        QVERIFY(!alone.error().isEmpty());
+    }
+
+    void starredWordsAreBoldAndItalic() {
+        QCOMPARE(Markup::html("a *soft* word"), QString("a <em>soft</em> word"));
+        QCOMPARE(Markup::html("a **loud** word"), QString("a <strong>loud</strong> word"));
+        QCOMPARE(Markup::html("***both***"), QString("<strong><em>both</em></strong>"));
+        QCOMPARE(Markup::html("*one* and **two** here"), QString("<em>one</em> and <strong>two</strong> here"));
+        QCOMPARE(Markup::html("**two words**, then *more of them*."),
+                 QString("<strong>two words</strong>, then <em>more of them</em>."));
+        // What is inside is still escaped.
+        QCOMPARE(Markup::html("*a < b* & c"), QString("<em>a &lt; b</em> &amp; c"));
+        // Stars that hug no word are the stars they are.
+        QCOMPARE(Markup::html("2 * 3 * 4"), QString("2 * 3 * 4"));
+        QCOMPARE(Markup::html("a lone * star"), QString("a lone * star"));
+        QCOMPARE(Markup::html("* not this *"), QString("* not this *"));
+        QCOMPARE(Markup::html("**open and never closed"), QString("**open and never closed"));
+        QCOMPARE(Markup::html("**uneven*"), QString("**uneven*"));
+        QCOMPARE(Markup::html("****"), QString("****"));
+        QCOMPARE(Markup::html(""), QString());
+
+        // The page dims the stars and styles the words between them.
+        const QList<Markup::Span> spans = Markup::spans("x **yo** z");
+        QCOMPARE(spans.size(), 3);
+        QVERIFY(spans[0].mark && spans[0].start == 2 && spans[0].length == 2);
+        QVERIFY(!spans[1].mark && spans[1].bold && !spans[1].italic && spans[1].start == 4 && spans[1].length == 2);
+        QVERIFY(spans[2].mark && spans[2].start == 6 && spans[2].length == 2);
+
+        // A shared book carries them, and nothing reaches across a line.
+        const QString page = Epub::page("T", "", "a **bold** line\nan *open one\nclosed* here");
+        QVERIFY(page.contains("a <strong>bold</strong> line"));
+        QVERIFY(page.contains("an *open one"));
+        QVERIFY(page.contains("closed* here"));
+    }
+
+    void thePageStylesStarredWordsWithoutChangingThem() {
+        QTextDocument document;
+        document.setPlainText("plain **bold** and *soft*");
+        auto *highlighter = new MarkupHighlighter(&document);
+        highlighter->setFaint(QColor(Qt::gray));
+        QCoreApplication::processEvents();
+        bool bold = false, italic = false;
+        for (const auto &range : document.firstBlock().layout()->formats()) {
+            if (range.start == 8 && range.length == 4)
+                bold = range.format.fontWeight() == QFont::Bold;
+            if (range.start == 20 && range.length == 4)
+                italic = range.format.fontItalic();
+        }
+        QVERIFY(bold);
+        QVERIFY(italic);
+        // Only the look changed: what is saved is what was typed.
+        QCOMPARE(Backend::rawText(document), QString("plain **bold** and *soft*"));
     }
 
     void aSharedBookKeepsItsLinesAndItsMarks() {
@@ -671,6 +840,39 @@ private slots:
         QTest::keyClick(window, Qt::Key_Escape);
         QTRY_VERIFY(!editor->property("visible").toBool());
         QVERIFY(!notice->property("visible").toBool());
+
+        // In a book, Ctrl B and Ctrl I put stars around the picked words,
+        // and take them away again.
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_VERIFY(editor->property("visible").toBool());
+        QTRY_VERIFY(page->hasActiveFocus());
+        QMetaObject::invokeMethod(page, "select", Q_ARG(int, 0), Q_ARG(int, 2));
+        QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+        QCOMPARE(page->property("text").toString(), QString("**nq**\n?"));
+        QCOMPARE(page->property("selectedText").toString(), QString("nq"));
+        QTest::keyClick(window, Qt::Key_I, Qt::ControlModifier);
+        QCOMPARE(page->property("text").toString(), QString("***nq***\n?"));
+        QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+        QCOMPARE(page->property("text").toString(), QString("*nq*\n?"));
+        QTest::keyClick(window, Qt::Key_I, Qt::ControlModifier);
+        QCOMPARE(page->property("text").toString(), QString("nq\n?"));
+        // With nothing picked the stars arrive with the cursor between them.
+        QMetaObject::invokeMethod(page, "select", Q_ARG(int, 2), Q_ARG(int, 2));
+        QTest::keyClick(window, Qt::Key_I, Qt::ControlModifier);
+        QTest::keyClick(window, Qt::Key_X);
+        QCOMPARE(page->property("text").toString(), QString("nq*x*\n?"));
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!editor->property("visible").toBool());
+        QCOMPARE(backend.readText(bookId), QString("nq*x*\n?"));
+        window->setProperty("notice", QString());
+
+        // C asks the desktop for a picture and stands it on the picked book.
+        QVERIFY(paint(dir.path() + "/roses.png", Qt::red));
+        picker.pickedCover = QUrl::fromLocalFile(dir.path() + "/roses.png");
+        QTest::keyClick(window, Qt::Key_C);
+        QCOMPARE(picker.askedForCover, 1);
+        QVERIFY(!backend.books().at(0).toMap().value("coverUrl").toString().isEmpty());
+        QCOMPARE(shelf->property("currentIndex").toInt(), 0);
 
         // A asks the desktop for files; the picked one lands on the shelf
         // and is the book picked there.

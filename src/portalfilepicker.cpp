@@ -111,6 +111,33 @@ void PortalFilePicker::openBooks() {
     options.insert(QStringLiteral("current_filter"), QVariant::fromValue(books));
 
     requestFile(QStringLiteral("OpenFile"), tr("Add books to the shelf"), options);
+    m_forCover = false;
+}
+
+void PortalFilePicker::openCover() {
+    const PortalFileFilter pictures{
+        tr("Pictures"),
+        {
+            {0, QStringLiteral("*.png")},
+            {0, QStringLiteral("*.jpg")},
+            {0, QStringLiteral("*.jpeg")},
+            {1, QStringLiteral("image/png")},
+            {1, QStringLiteral("image/jpeg")},
+        },
+    };
+
+    const QString pictureFolder = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+    QVariantMap options;
+    options.insert(QStringLiteral("accept_label"), tr("Use as cover"));
+    options.insert(QStringLiteral("modal"), true);
+    options.insert(QStringLiteral("multiple"), false);
+    options.insert(QStringLiteral("current_folder"),
+                   portalPathBytes(QDir(pictureFolder).exists() ? pictureFolder : QDir::homePath()));
+    options.insert(QStringLiteral("filters"), QVariant::fromValue(PortalFileFilters{pictures}));
+    options.insert(QStringLiteral("current_filter"), QVariant::fromValue(pictures));
+
+    requestFile(QStringLiteral("OpenFile"), tr("Pick a picture for the cover"), options);
+    m_forCover = true;
 }
 
 bool PortalFilePicker::connectToRequestPath(const QString &path) {
@@ -205,6 +232,7 @@ void PortalFilePicker::requestFile(const QString &method, const QString &title, 
 }
 
 void PortalFilePicker::handleResponse(uint response, const QVariantMap &results) {
+    const bool forCover = m_forCover;
     clearPending();
 
     if (response != 0)
@@ -213,7 +241,11 @@ void PortalFilePicker::handleResponse(uint response, const QVariantMap &results)
     QList<QUrl> urls;
     for (const QString &uri : results.value(QStringLiteral("uris")).toStringList())
         urls << QUrl(uri);
-    if (!urls.isEmpty())
+    if (urls.isEmpty())
+        return;
+    if (forCover)
+        emit coverSelected(urls.first());
+    else
         emit booksSelected(urls);
 }
 

@@ -109,6 +109,12 @@ ApplicationWindow {
         grid.forceActiveFocus()
     }
 
+    function chooseCover(index) {
+        const book = backend.books[index]
+        if (book)
+            backend.chooseCover(book.id)
+    }
+
     function shareBook(index) {
         const book = backend.books[index]
         if (book)
@@ -146,6 +152,7 @@ ApplicationWindow {
     Shortcut { sequence: "N"; enabled: win.shelfHasKeys; onActivated: newBook.open() }
     Shortcut { sequence: "A"; enabled: win.shelfHasKeys; onActivated: backend.chooseFiles() }
     Shortcut { sequence: "S"; enabled: win.shelfHasKeys; onActivated: win.shareBook(grid.currentIndex) }
+    Shortcut { sequence: "C"; enabled: win.shelfHasKeys; onActivated: win.chooseCover(grid.currentIndex) }
     // One Shortcut per key, so `omarchy agent look app --keys` can press each.
     Shortcut { sequence: "Return"; enabled: win.shelfHasKeys; onActivated: win.openBook(grid.currentIndex) }
     Shortcut { sequence: "Enter"; enabled: win.shelfHasKeys; onActivated: win.openBook(grid.currentIndex) }
@@ -154,6 +161,8 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+?"; enabled: win.editing; onActivated: help.opened ? help.close() : help.open() }
     Shortcut { sequence: "Escape"; enabled: win.editing && !help.opened; onActivated: win.closeBook() }
     Shortcut { sequences: [StandardKey.Save]; enabled: win.editing; onActivated: win.saveBook() }
+    Shortcut { sequences: [StandardKey.Bold]; enabled: win.editing && !help.opened; onActivated: page.mark("**") }
+    Shortcut { sequences: [StandardKey.Italic]; enabled: win.editing && !help.opened; onActivated: page.mark("*") }
     Shortcut { sequence: "Ctrl+Q"; enabled: win.editing; onActivated: if (win.saveBook()) Qt.quit() }
 
     // A book that has just been added is the one picked on the shelf.
@@ -221,6 +230,7 @@ ApplicationWindow {
                     { keys: "N", action: qsTr("New book") },
                     { keys: "A", action: qsTr("Add files") },
                     { keys: "S", action: qsTr("Share") },
+                    { keys: "C", action: qsTr("Cover") },
                     { keys: "?", action: qsTr("Shortcuts") }
                 ]
                 delegate: RowLayout {
@@ -402,6 +412,7 @@ ApplicationWindow {
 
                     readonly property bool current: GridView.isCurrentItem
                     readonly property color tint: win.tintFor(modelData.tint)
+                    readonly property bool pictured: (modelData.coverUrl || "") !== ""
 
                     // The book's color, thrown onto the board it stands on.
                     Rectangle {
@@ -430,6 +441,38 @@ ApplicationWindow {
 
                         Behavior on y { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
 
+                        // The book's own picture, when it has one, behind the
+                        // title and the author. It fills the cover and is cut
+                        // at the edges rather than squeezed.
+                        Image {
+                            id: picture
+                            objectName: "coverPicture"
+                            anchors.fill: parent
+                            anchors.margins: cover.border.width
+                            visible: cell.pictured && status === Image.Ready
+                            source: cell.pictured ? cell.modelData.coverUrl : ""
+                            fillMode: Image.PreserveAspectCrop
+                            clip: true
+                            asynchronous: true
+                            // Twice the cover, for sharp screens, and no more:
+                            // a photo is never held at its full size.
+                            sourceSize.width: win.coverWidth * 2
+                            sourceSize.height: win.coverHeight * 2
+                        }
+
+                        // Shade under the title and the author, so both read
+                        // on any picture.
+                        Rectangle {
+                            anchors.fill: picture
+                            visible: picture.visible
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.72) }
+                                GradientStop { position: 0.45; color: Qt.rgba(0, 0, 0, 0.0) }
+                                GradientStop { position: 0.68; color: Qt.rgba(0, 0, 0, 0.0) }
+                                GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.78) }
+                            }
+                        }
+
                         // A lit strip along the top edge, in the book's color.
                         Rectangle {
                             x: 1
@@ -445,6 +488,7 @@ ApplicationWindow {
                             y: 5
                             width: 1
                             height: parent.height - 6
+                            visible: !picture.visible
                             color: win.fade(cell.tint, 0.5)
                         }
 
@@ -456,7 +500,7 @@ ApplicationWindow {
                             anchors.leftMargin: 20
                             anchors.rightMargin: 12
                             text: cell.modelData.title
-                            color: theme.foreground
+                            color: picture.visible ? "white" : theme.foreground
                             font.pixelSize: 15
                             font.bold: true
                             wrapMode: Text.Wrap
@@ -488,8 +532,8 @@ ApplicationWindow {
                             anchors.leftMargin: 20
                             anchors.rightMargin: 10
                             text: cell.modelData.author
-                            color: theme.foreground
-                            opacity: 0.75
+                            color: picture.visible ? "white" : theme.foreground
+                            opacity: picture.visible ? 0.9 : 0.75
                             font.pixelSize: 10
                             font.letterSpacing: 0.4
                             font.capitalization: Font.AllUppercase
@@ -512,7 +556,14 @@ ApplicationWindow {
             DropArea {
                 anchors.fill: parent
                 onDropped: function(drop) {
-                    if (drop.hasUrls)
+                    if (!drop.hasUrls)
+                        return
+                    // One picture dropped in is a cover for the picked book;
+                    // anything else is books for the shelf.
+                    const book = backend.books[grid.currentIndex]
+                    if (drop.urls.length === 1 && book && backend.isPicture(drop.urls[0]))
+                        backend.setCover(book.id, drop.urls[0])
+                    else
                         backend.addFiles(drop.urls)
                 }
             }
@@ -662,6 +713,67 @@ ApplicationWindow {
                 // Whether anything was written since the book was opened.
                 property bool written: false
 
+                // Starred words show as bold and italic; the stars dim.
+                readonly property color faint: win.fade(theme.foreground, 0.35)
+                Component.onCompleted: backend.decorate(textDocument, faint)
+                onFaintChanged: backend.decorate(textDocument, faint)
+
+                // Puts stars around the picked words, or takes them away
+                // when they are already there: "**" is bold, "*" italic.
+                // With nothing picked, the stars arrive with the cursor
+                // between them, ready to type into.
+                function mark(stars) {
+                    const from = selectionStart
+                    const to = selectionEnd
+                    const n = stars.length
+                    if (from === to) {
+                        insert(from, stars + stars)
+                        cursorPosition = from + n
+                        return
+                    }
+                    const picked = getText(from, to)
+                    // Stars never reach across lines, so each line of a
+                    // longer pick gets its own, last line first so the
+                    // places of the earlier ones hold.
+                    if (picked.indexOf("\n") !== -1) {
+                        const lines = picked.split("\n")
+                        let end = to
+                        for (let i = lines.length - 1; i >= 0; --i) {
+                            const start = end - lines[i].length
+                            const words = lines[i].trim()
+                            if (words !== "") {
+                                const lead = lines[i].indexOf(words)
+                                insert(start + lead + words.length, stars)
+                                insert(start + lead, stars)
+                            }
+                            end = start - 1
+                        }
+                        cursorPosition = from
+                        return
+                    }
+                    // How many stars already hug the pick on both sides.
+                    let around = 0
+                    while (around < 3 && from - around > 0 && getText(from - around - 1, from - around) === "*"
+                           && getText(to + around, to + around + 1) === "*")
+                        ++around
+                    const has = n === 2 ? around >= 2 : around === 1 || around === 3
+                    if (has) {
+                        remove(to, to + n)
+                        remove(from - n, from)
+                        select(from - n, to - n)
+                    } else {
+                        // Spaces at the ends stay outside the stars, or the
+                        // stars would not take.
+                        const words = picked.trim()
+                        if (words === "")
+                            return
+                        const start = from + picked.indexOf(words)
+                        insert(start + words.length, stars)
+                        insert(start, stars)
+                        select(start + n, start + n + words.length)
+                    }
+                }
+
                 onCursorRectangleChanged: pageArea.follow(cursorRectangle)
                 onTextChanged: {
                     if (win.editing && unsaved) {
@@ -801,6 +913,8 @@ ApplicationWindow {
                 model: win.editing ? [
                     { keys: "Esc", action: qsTr("Back to the shelf") },
                     { keys: "Ctrl S", action: qsTr("Save now") },
+                    { keys: "Ctrl B", action: qsTr("Bold") },
+                    { keys: "Ctrl I", action: qsTr("Italic") },
                     { keys: "F1", action: qsTr("Show or hide the shortcuts") },
                     { keys: "Ctrl Q", action: qsTr("Quit") }
                 ] : [
@@ -808,6 +922,7 @@ ApplicationWindow {
                     { keys: "N", action: qsTr("Write a new book") },
                     { keys: "A", action: qsTr("Add PDF or EPUB files") },
                     { keys: "S", action: qsTr("Share the book as a file") },
+                    { keys: "C", action: qsTr("Put a picture on the cover") },
                     { keys: "← → ↑ ↓", action: qsTr("Move along the shelf") },
                     { keys: "?", action: qsTr("Show or hide the shortcuts") },
                     { keys: "Q", action: qsTr("Quit") }
